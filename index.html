@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Descent to the Center of the Earth: race</title>
+<style>
+:root{box-sizing:border-box;--bg:#efe6d2;--fg:#2a1d12;--mut:#6b5842;--btn:#2a1d12;--btnfg:#efe6d2;--acc:#b8431c}
+@media (prefers-color-scheme:dark){:root{--bg:#15110e;--fg:#eadfc4;--mut:#a39378;--btn:#eadfc4;--btnfg:#15110e;--acc:#f08a4b}}
+*,*:before,*:after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:Palatino,"Palatino Linotype","Book Antiqua",Georgia,serif;line-height:1.5;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{max-width:780px;margin:0 auto;padding:20px 16px 32px}
+h1{font-size:1.7rem;line-height:1.15;margin:0 0 6px}
+p.sub{margin:0 0 12px;color:var(--mut)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+button,select,input{font:inherit;font-size:.95rem;padding:7px 12px;border-radius:4px;border:1px solid var(--fg)}
+button{background:var(--btn);color:var(--btnfg);cursor:pointer}
+button:disabled{opacity:.4;cursor:not-allowed}
+select,input{background:transparent;color:var(--fg)}
+input{width:11em}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+#status{margin:6px 0;padding:8px 10px;border-left:4px solid var(--acc);background:rgba(128,100,60,.14)}
+.stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:.95rem;margin:6px 0;color:var(--mut)}
+.stats b{color:var(--fg)}
+.wrap{position:relative}
+canvas{display:block;width:100%;height:auto;border:2px solid var(--fg);border-radius:4px;touch-action:none}
+#win{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;background:rgba(10,6,3,.86);color:#f3e6c4;padding:20px;border-radius:4px}
+#win.on{display:flex}
+#win h2{margin:0 0 8px;font-size:1.5rem}
+#win ol{text-align:left;display:inline-block;margin:6px 0;padding-left:1.4em}
+#win button{margin-top:12px;background:#f3e6c4;color:#15110e;border-color:#f3e6c4}
+#count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:5rem;color:#ffd34a;text-shadow:0 2px 12px #000;pointer-events:none}
+#count.on{display:flex}
+#players{list-style:none;margin:10px 0 0;padding:0;font-size:.95rem;display:flex;flex-wrap:wrap;gap:6px 16px}
+#players i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,52px);gap:6px;justify-content:center;margin:14px 0 0}
+.pad button{padding:0;font-size:1.3rem}
+.pad .u{grid-column:2}.pad .l{grid-row:2;grid-column:1}.pad .d{grid-row:2;grid-column:2}.pad .r{grid-row:2;grid-column:3}
+.hint{font-size:.88rem;color:var(--mut);margin-top:12px}
+</style></head><body><main>
+<h1>Descent to the Center of the Earth</h1>
+<p class="sub">Race through the caverns beneath Snæfellsjökull. The race ends when the first three explorers reach the center. No account needed.</p>
+<div class="bar">
+<input id="name" maxlength="16" placeholder="Your name" aria-label="Your name">
+<button id="start" hidden>Start race</button>
+<button id="new">Practice alone</button>
+<select id="size" aria-label="Size"><option value="0">Hard</option><option value="1" selected>Expert</option><option value="2">Brutal</option></select>
+</div>
+<div id="status" role="status" aria-live="polite"></div>
+<div class="stats"><span>Depth <b id="depth">0</b> leagues</span><span>Moves <b id="moves">0</b></span><span>Time <b id="time">0:00</b></span><span>Connected <b id="conn">offline</b></span></div>
+<div class="wrap"><canvas id="c" tabindex="0" aria-label="Maze. Use arrow keys or WASD to move."></canvas><div id="count"></div>
+<div id="win"><div><h2 id="wh"></h2><div id="res"></div><button id="again">Descend again</button></div></div></div>
+<ul id="players" aria-label="Explorers"></ul>
+<div class="pad"><button class="u" data-d="0" aria-label="Up">↑</button><button class="l" data-d="3" aria-label="Left">←</button><button class="d" data-d="2" aria-label="Down">↓</button><button class="r" data-d="1" aria-label="Right">→</button></div>
+<p class="hint">Arrow keys or WASD to move. Everyone on the same size shares one lobby cavern; press Start race for a timed race. Practice alone makes a private cavern.</p>
+</main>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getDatabase,ref,set,onValue,onDisconnect} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// ====== PASTE YOUR FIREBASE WEB CONFIG HERE (see README.md) ======
+const firebaseConfig={
+  apiKey:"AIzaSyC8ceB09KUoIEh1UA0N-iQeAlngldd3RHk",
+  authDomain:"maze-multiplayer-d0098.firebaseapp.com",
+  databaseURL:"https://maze-multiplayer-d0098-default-rtdb.firebaseio.com/",
+  projectId:"maze-multiplayer-d0098",
+  appId:"1:813687142014:web:28df001861f371b01c0a2f"
+};
+// =================================================================
+
+const $=id=>document.getElementById(id);
+const SZ=[[26,38],[34,50],[42,62]],RUNES="ᚨᛒᚲᛞᛖᚠᚷᚺᛁᛃᚴᛚᛗᚾᛟᛈᚱᛊᛏᚢ";
+const PAL=['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#42d4f4','#f032e6','#bfef45','#ffe119','#fabed4','#469990','#9a6324'];
+const STOPS=[[0,[205,214,222]],[.18,[120,128,134]],[.4,[122,92,66]],[.65,[150,64,38]],[.85,[200,70,24]],[1,[255,150,40]]];
+const DX=[0,1,0,-1],DY=[-1,0,1,0],cv=$('c'),ctx=cv.getContext('2d');
+let cols,rows,cs,g,px,py,sx,gx,moves,t0,deco,seedUsed=0;
+let fdb=null,uid=null,offset=0,neterr='',round=null,fins=[],unFins=null,curRound=0,myFin=false,raw={},peers=[],soloDone=false;
+const now=()=>Date.now()+offset;
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function col(t){for(let i=1;i<STOPS.length;i++){if(t<=STOPS[i][0]){const a=STOPS[i-1],b=STOPS[i],k=(t-a[0])/(b[0]-a[0]);return a[1].map((v,j)=>Math.round(v+(b[1][j]-v)*k))}}return STOPS[5][1]}
+function fmt(ms){const s=Math.max(0,Math.floor(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+function myName(){return($('name').value.trim().slice(0,16))||'Explorer'}
+function pcol(id){const l=peers.filter(p=>p.r===seedUsed).map(p=>p.id).sort(),i=l.indexOf(id);return PAL[(i<0?0:i)%PAL.length]}
+function build(seed,size){
+const R=rng(seed),s=SZ[size]||SZ[1];cols=s[0];rows=s[1];seedUsed=seed;
+g=Array.from({length:rows},()=>Array(cols).fill(0));
+const vis=Array.from({length:rows},()=>Array(cols).fill(false));
+sx=Math.floor(R()*cols);const st=[[sx,0]];vis[0][sx]=true;
+while(st.length){const si=R()<.6?Math.floor(R()*st.length):st.length-1;const [x,y]=st[si];
+const o=[0,1,2,3].filter(d=>{const nx=x+DX[d],ny=y+DY[d];return nx>=0&&ny>=0&&nx<cols&&ny<rows&&!vis[ny][nx]});
+if(!o.length){st.splice(si,1);continue}
+const d=o[Math.floor(R()*o.length)],nx=x+DX[d],ny=y+DY[d];
+g[y][x]|=1<<d;g[ny][nx]|=1<<((d+2)%4);vis[ny][nx]=true;st.push([nx,ny])}
+gx=Math.min(cols-1,Math.max(0,cols-1-sx+Math.floor(R()*5)-2));
+px=sx;py=0;moves=0;t0=null;soloDone=false;myFin=false;
+deco=[];for(let i=0;i<Math.floor(cols*rows/6);i++)deco.push([Math.floor(R()*cols),Math.floor(R()*rows),RUNES[Math.floor(R()*RUNES.length)]]);
+const W=Math.min(760,document.querySelector('main').clientWidth);cs=Math.max(6,Math.floor(W/cols));
+const dpr=window.devicePixelRatio||1;cv.width=cs*cols*dpr;cv.height=cs*rows*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+$('win').classList.remove('on');hud();draw();pres()}
+function hud(){$('depth').textContent=Math.round(py/(rows-1)*120);$('moves').textContent=moves}
+function draw(){
+const w=cs*cols;
+for(let y=0;y<rows;y++){ctx.fillStyle=`rgb(${col((y+.5)/rows)})`;ctx.fillRect(0,y*cs,w,cs)}
+ctx.font=`${Math.floor(cs*.6)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='rgba(0,0,0,.2)';
+deco.forEach(([x,y,r])=>ctx.fillText(r,x*cs+cs/2,y*cs+cs/2));
+const gxp=gx*cs+cs/2,gyp=(rows-1)*cs+cs/2,gr=ctx.createRadialGradient(gxp,gyp,0,gxp,gyp,cs*.9);
+gr.addColorStop(0,'#fffbe0');gr.addColorStop(.35,'#ffd34a');gr.addColorStop(1,'rgba(255,120,20,0)');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(gxp,gyp,cs*.9,0,7);ctx.fill();
+ctx.fillStyle='#1b1410';ctx.beginPath();ctx.arc(sx*cs+cs/2,cs/2,cs*.2,0,7);ctx.fill();
+ctx.strokeStyle='#1b1410';ctx.lineWidth=Math.max(2,cs*.12);ctx.lineCap='square';ctx.beginPath();
+for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){const m=g[y][x],x0=x*cs,y0=y*cs;
+if(!(m&1)&&!(y==0&&x==sx)){ctx.moveTo(x0,y0);ctx.lineTo(x0+cs,y0)}
+if(!(m&8)){ctx.moveTo(x0,y0);ctx.lineTo(x0,y0+cs)}
+if(!(m&2)){ctx.moveTo(x0+cs,y0);ctx.lineTo(x0+cs,y0+cs)}
+if(!(m&4)&&!(y==rows-1&&x==gx)){ctx.moveTo(x0,y0+cs);ctx.lineTo(x0+cs,y0+cs)}}
+ctx.stroke();
+peers.forEach(p=>{if(p.isMe||p.r!==seedUsed||!(p.x>=0&&p.x<cols&&p.y>=0&&p.y<rows))return;
+const cx=p.x*cs+cs/2,cy=p.y*cs+cs/2;ctx.fillStyle=pcol(p.id);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,cs*.3,0,7);ctx.fill();ctx.stroke();
+if(cs>=9){ctx.font=`bold ${Math.max(9,Math.floor(cs*.55))}px sans-serif`;ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=3;const t=String(p.n||'').slice(0,16);ctx.strokeText(t,cx,cy-cs*.55);ctx.fillText(t,cx,cy-cs*.55)}});
+const ax=px*cs+cs/2,ay=py*cs+cs/2;
+ctx.fillStyle=fdb&&uid?pcol(uid):'#fff6c8';ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(ax,ay,cs*.3,0,7);ctx.fill();ctx.stroke()}
+function phase(){if(!round)return'solo';if(fins.length>=3)return'over';if(now()<round.startAt)return'count';return'race'}
+function go(d){const ph=phase();if(ph==='count'||ph==='over'||myFin||soloDone)return;if(!(g[py][px]&(1<<d)))return;
+if(!round&&!t0)t0=Date.now();
+px+=DX[d];py+=DY[d];moves++;hud();draw();pres();
+if(py==rows-1&&px==gx){
+if(!round){soloDone=true;$('wh').textContent='You reached the center';$('res').textContent=`${moves} moves in ${fmt(Date.now()-t0)}. 120 leagues below Iceland.`;$('again').textContent='Descend again';$('win').classList.add('on')}
+else{myFin=true;const ms=now()-round.startAt;
+if(fdb&&uid)set(ref(fdb,`finishers/${curRound}/${uid}`),{ms,moves,name:myName()}).catch(()=>{$('status').textContent='Could not save your finish. Check your connection.'})}}}
+function pres(){if(fdb&&uid)set(ref(fdb,'players/'+uid),{r:seedUsed,x:px,y:py,n:myName(),t:now()}).catch(()=>{})}
+function refreshPeers(){peers=Object.entries(raw).filter(([id,p])=>p&&now()-p.t<15000).map(([id,p])=>({id,isMe:id===uid,...p}));
+$('conn').textContent=fdb?Math.max(1,peers.length):'offline';
+const ul=$('players');ul.textContent='';
+peers.filter(p=>p.r===seedUsed).sort((a,b)=>b.y-a.y).slice(0,12).forEach(p=>{const li=document.createElement('li'),i=document.createElement('i');i.style.background=pcol(p.id);li.appendChild(i);
+li.appendChild(document.createTextNode(`${String(p.n||'Explorer').slice(0,16)}${p.isMe?' (you)':''}: ${Math.round(p.y/(rows-1)*120)} leagues`));ul.appendChild(li)});draw()}
+function ui(){
+const ph=phase(),st=$('status'),cnt=$('count');cnt.classList.remove('on');
+$('new').hidden=!!round;
+const b=$('start');b.hidden=!fdb;b.disabled=!(ph==='solo'||ph==='over'||(round&&now()-round.startAt>600000));
+if(ph==='solo'){if(!soloDone)st.textContent=fdb?'Lobby cavern, shared with everyone on this page. Press Start race for a timed race, or Practice alone for a private cavern.':(neterr?'Offline: '+neterr:'Offline practice. Add your Firebase config (see README) to race others.');if(t0&&!soloDone)$('time').textContent=fmt(Date.now()-t0)}
+else if(ph==='count'){const s=Math.ceil((round.startAt-now())/1000);cnt.textContent=s;cnt.classList.add('on');st.textContent=`Race ${curRound} starts in ${s}. Everyone gets the same cavern.`;$('time').textContent='0:00'}
+else if(ph==='race'){const my=fins.findIndex(f=>f.id===uid);
+st.textContent=myFin?(my>=0?`You finished #${my+1}. Waiting for the other top three.`:'You reached the center. Waiting for confirmation.'):`Race ${curRound}: ${fins.length} of 3 places taken. Find the center.`;
+if(!myFin)$('time').textContent=fmt(now()-round.startAt)}
+else{st.textContent=`Race ${curRound} is over.`;
+if(!$('win').classList.contains('on')){const ol=document.createElement('ol');$('wh').textContent='Top three at the center';
+fins.slice(0,3).forEach(f=>{const li=document.createElement('li');li.textContent=`${String(f.name||'Explorer').slice(0,16)}: ${fmt(f.ms)} (${f.moves} moves)`;ol.appendChild(li)});
+const r=$('res');r.textContent='';r.appendChild(ol);$('again').textContent='Start next race';$('win').classList.add('on')}}}
+function setRound(d){if(!d||typeof d.round!=='number'||typeof d.seed!=='number')return;
+const changed=d.round!==curRound;round=d;
+if(changed){curRound=d.round;fins=[];build(d.seed,d.size);listenFins()}
+refreshPeers();ui()}
+function listenFins(){if(unFins)unFins();unFins=null;if(!fdb)return;
+unFins=onValue(ref(fdb,'finishers/'+curRound),s=>{const o=s.val()||{};fins=Object.entries(o).filter(([k,v])=>v&&typeof v.ms==='number').map(([k,v])=>({id:k,...v})).sort((a,b)=>a.ms-b.ms);ui()},()=>{})}
+async function startRace(){if(!fdb)return;const next=(round?round.round:0)+1;
+try{await set(ref(fdb,'rounds/current'),{round:next,seed:Math.floor(Math.random()*2147483647),size:+$('size').value,startAt:now()+6000})}catch(e){$('status').textContent='Could not start the race: '+(e.code||e.message)}}
+async function net(){
+if(!firebaseConfig.apiKey||firebaseConfig.apiKey.startsWith('PASTE')){ui();return}
+try{const app=initializeApp(firebaseConfig);fdb=getDatabase(app);
+onValue(ref(fdb,'.info/serverTimeOffset'),s=>{offset=s.val()||0});
+const cred=await signInAnonymously(getAuth(app));uid=cred.user.uid;
+onDisconnect(ref(fdb,'players/'+uid)).remove();
+onValue(ref(fdb,'rounds/current'),s=>{const d=s.val();if(d)setRound(d);else ui()},e=>{neterr=e.code||e.message;ui()});
+onValue(ref(fdb,'players'),s=>{raw=s.val()||{};refreshPeers()},()=>{});
+pres();ui()}catch(e){fdb=null;neterr=e.code||e.message;ui()}}
+addEventListener('keydown',e=>{if(e.target&&e.target.tagName==='INPUT')return;const m={ArrowUp:0,w:0,W:0,ArrowRight:1,d:1,D:1,ArrowDown:2,s:2,S:2,ArrowLeft:3,a:3,A:3}[e.key];if(m!==undefined){e.preventDefault();go(m)}});
+document.querySelectorAll('.pad button').forEach(b=>b.addEventListener('click',()=>go(+b.dataset.d)));
+let x0,y0;cv.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY},{passive:true});
+cv.addEventListener('touchend',e=>{const t=e.changedTouches[0],dx=t.clientX-x0,dy=t.clientY-y0;if(Math.max(Math.abs(dx),Math.abs(dy))<20)return;go(Math.abs(dx)>Math.abs(dy)?(dx>0?1:3):(dy>0?2:0))});
+function solo(){round=null;curRound=0;fins=[];build(Math.floor(Math.random()*2147483647),+$('size').value);ui()}
+$('new').addEventListener('click',solo);
+$('again').addEventListener('click',()=>{if(round)startRace();else solo()});
+$('start').addEventListener('click',startRace);
+$('size').addEventListener('change',()=>{if(!round){build(1864+ +$('size').value,+$('size').value);ui()}});
+try{$('name').value=localStorage.getItem('mazeName')||''}catch(e){}
+$('name').addEventListener('change',()=>{try{localStorage.setItem('mazeName',myName())}catch(e){}pres()});
+build(1865,1);
+setInterval(()=>{ui();draw()},150);setInterval(()=>{pres();refreshPeers()},3000);
+net();
+</script></body></html>
